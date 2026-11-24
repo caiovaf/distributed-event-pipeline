@@ -8,16 +8,21 @@ import com.caiovaf.pipeline.domain.model.OrderStatus;
 import com.caiovaf.pipeline.infrastructure.kafka.OrderProducer;
 import com.caiovaf.pipeline.infrastructure.persistence.OrderRepository;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -32,9 +37,34 @@ public class OrderController {
 
     @PostMapping
     @Transactional
-    @Operation(summary = "Submit a new order into the event pipeline")
-    public ResponseEntity<OrderResponse> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        String correlationId = UUID.randomUUID().toString();
+    @Operation(
+        summary = "Submit a new order into the event pipeline",
+        parameters = {
+            @Parameter(name = "Idempotency-Key", in = ParameterIn.HEADER, description = "Unique client-supplied idempotency key", required = false),
+            @Parameter(name = "X-Correlation-ID", in = ParameterIn.HEADER, description = "Alternative correlation identifier", required = false)
+        }
+    )
+    public ResponseEntity<OrderResponse> createOrder(
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+        @RequestHeader(value = "X-Correlation-ID", required = false) String headerCorrelationId,
+        @Valid @RequestBody CreateOrderRequest request
+    ) {
+        String correlationId = resolveCorrelationId(idempotencyKey, headerCorrelationId);
+
+        // Check for idempotent request replay
+        Optional<Order> existingOrder = orderRepository.findByCorrelationId(correlationId);
+        if (existingOrder.isPresent()) {
+            Order order = existingOrder.get();
+            log.info("Idempotent request replay detected for correlationId=[{}]. Returning existing order without duplicate emission.", correlationId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.add("X-Idempotency-Replay", "true");
+            headers.add("X-Correlation-ID", correlationId);
+
+            return ResponseEntity.status(HttpStatus.OK)
+                .headers(headers)
+                .body(OrderResponse.fromEntity(order));
+        }
 
         log.info("Received HTTP order creation: customerId={}, amount={}, correlationId={}",
             request.customerId(), request.amount(), correlationId);
@@ -58,7 +88,11 @@ public class OrderController {
             Instant.now()
         ));
 
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("X-Correlation-ID", correlationId);
+
         return ResponseEntity.status(HttpStatus.ACCEPTED)
+            .headers(headers)
             .body(OrderResponse.fromEntity(saved));
     }
 
@@ -78,5 +112,15 @@ public class OrderController {
             .map(OrderResponse::fromEntity)
             .map(ResponseEntity::ok)
             .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    private String resolveCorrelationId(String idempotencyKey, String headerCorrelationId) {
+        if (StringUtils.hasText(idempotencyKey)) {
+            return idempotencyKey.trim();
+        }
+        if (StringUtils.hasText(headerCorrelationId)) {
+            return headerCorrelationId.trim();
+        }
+        return UUID.randomUUID().toString();
     }
 }

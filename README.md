@@ -134,15 +134,18 @@ The application will boot and bind to port `8080`.
 
 ## 🧪 Testing the Pipeline
 
-### Submit an Order
+### Submit an Order (with HTTP Idempotency Key)
 ```bash
 curl -X POST http://localhost:8080/api/v1/orders \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: idemp_req_8921" \
   -d '{
     "customerId": "cust_enterprise_99",
     "amount": 250.75
   }'
 ```
+
+Replaying the identical request with the same `Idempotency-Key` returns HTTP `200 OK` with the existing order and header `X-Idempotency-Replay: true`, preventing duplicated Kafka messages or financial processing.
 
 **Response (HTTP 202 Accepted):**
 ```json
