@@ -7,7 +7,7 @@ import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.util.backoff.FixedBackOff;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 
 @Configuration
 public class KafkaConsumerConfig {
@@ -20,8 +20,12 @@ public class KafkaConsumerConfig {
             (record, exception) -> new TopicPartition(record.topic() + ".DLT", record.partition())
         );
 
-        // 3 retry attempts with a 2-second interval before publishing to DLT
-        FixedBackOff backOff = new FixedBackOff(2000L, 3);
+        // Exponential backoff: 3 retries, starting at 1000ms with multiplier 2.0 (1s -> 2s -> 4s) up to 8s
+        ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(3);
+        backOff.setInitialInterval(1000L);
+        backOff.setMultiplier(2.0);
+        backOff.setMaxInterval(8000L);
+
         return new DefaultErrorHandler(recoverer, backOff);
     }
 }

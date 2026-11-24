@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.caiovaf</groupId>
     <artifactId>distributed-event-pipeline</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <name>distributed-event-pipeline</name>
     <description>Production-grade distributed event pipeline with Java 21, Spring Boot 3, Kafka, PostgreSQL, and Redis</description>
 
